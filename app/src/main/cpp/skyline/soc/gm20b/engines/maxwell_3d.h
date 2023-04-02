@@ -69,6 +69,8 @@ namespace skyline::soc::gm20b::engine::maxwell3d {
             }
         } deferredDraw{};
 
+        bool CheckRenderEnable();
+
         type::DrawTopology ApplyTopologyOverride(type::DrawTopology beginMethodTopology);
 
         void FlushDeferredDraw();
@@ -260,10 +262,26 @@ namespace skyline::soc::gm20b::engine::maxwell3d {
             Register<0x547, u32> zCullStatCountersEnable;
             Register<0x548, u32> pointSpriteEnable;
             Register<0x54A, u32> shaderExceptions;
+
+            Register<0x54C, type::ClearReportValue> clearReportValue;
+
             Register<0x54D, u32> multisampleEnable;
             Register<0x54E, type::ZtSelect> ztSelect;
 
             Register<0x54F, type::MultisampleControl> multisampleControl;
+
+            struct RenderEnable {
+                enum class Mode : u32 {
+                    False = 0,
+                    True = 1,
+                    Conditional = 2,
+                    RenderIfEqual = 3,
+                    RenderIfNotEqual = 4,
+                };
+                Address offset;
+                Mode mode;
+            };
+            Register<0x554, RenderEnable> renderEnable;
 
             Register<0x557, TexSamplerPool> texSamplerPool;
 
@@ -371,6 +389,19 @@ namespace skyline::soc::gm20b::engine::maxwell3d {
             Register<0x649, u32> pixelCentreImage;
             Register<0x64B, u32> viewportScaleOffsetEnable;
             Register<0x64F, type::ViewportClipControl> viewportClipControl;
+
+            struct RenderEnableOverride {
+                enum class Mode : u8 {
+                    UseRenderEnable = 0,
+                    AlwaysRender = 1,
+                    NeverRender = 2,
+                };
+
+                Mode mode : 2;
+                u32 _pad_ : 30;
+            };
+            Register<0x651, RenderEnableOverride> renderEnableOverride;
+
 
             Register<0x652, type::PrimitiveTopologyControl> primitiveTopologyControl;
             Register<0x65C, type::PrimitiveTopology> primitiveTopology;

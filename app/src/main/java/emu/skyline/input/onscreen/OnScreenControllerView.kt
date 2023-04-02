@@ -9,14 +9,10 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
-import android.content.Context.VIBRATOR_MANAGER_SERVICE
-import android.content.Context.VIBRATOR_SERVICE
 import android.graphics.Canvas
 import android.graphics.PointF
-import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.os.VibratorManager
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
@@ -39,7 +35,7 @@ typealias OnStickStateChangedListener = (stickId : StickId, position : PointF) -
 class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs : AttributeSet? = null, defStyleAttr : Int = 0, defStyleRes : Int = 0) : View(context, attrs, defStyleAttr, defStyleRes) {
     companion object {
         private val controllerTypeMappings = mapOf(*ControllerType.values().map {
-            it to (setOf(*it.buttons) to setOf(*it.sticks))
+            it to (setOf(*it.buttons) + setOf(*it.optionalButtons) to setOf(*it.sticks))
         }.toTypedArray())
 
         private const val SCALE_STEP = 0.05f
@@ -47,7 +43,6 @@ class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs 
         private val ALPHA_RANGE = 55..255
     }
 
-    private val controls = Controls(this)
     private var onButtonStateChangedListener : OnButtonStateChangedListener? = null
     private var onStickStateChangedListener : OnStickStateChangedListener? = null
     private val joystickAnimators = mutableMapOf<JoystickButton, Animator?>()
@@ -66,13 +61,16 @@ class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs 
             field = value
             (controls.circularButtons + controls.rectangularButtons + controls.triggerButtons).forEach { it.hapticFeedback = hapticFeedback }
         }
-    private val vibrator: Vibrator =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            (context.getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator
-        } else {
-            @Suppress("DEPRECATION") (context.getSystemService(VIBRATOR_SERVICE) as Vibrator)
-        }
-    private val effectClick = VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
+
+    val editInfo = OnScreenEditInfo()
+    val isEditing get() = editInfo.isEditing
+
+    // Populated externally by the activity, as retrieving the vibrator service inside the view crashes the layout editor
+    lateinit var vibrator : Vibrator
+    private val effectClick = VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+
+    // Ensure controls init happens after editInfo is initialized so that the buttons have a valid reference to it
+    private val controls = Controls(this)
 
     override fun onDraw(canvas : Canvas) {
         super.onDraw(canvas)
@@ -225,50 +223,56 @@ class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs 
     }
 
     private val editingTouchHandler = OnTouchListener { _, event ->
-        controls.allButtons.any { button ->
-            when (event.actionMasked) {
-                MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_POINTER_UP,
-                MotionEvent.ACTION_CANCEL -> {
-                    if (button.isEditing) {
-                        button.endEdit()
-                        return@any true
-                    }
-                }
+        var handled = false
 
-                MotionEvent.ACTION_DOWN,
-                MotionEvent.ACTION_POINTER_DOWN -> {
-                    if (button.config.enabled && button.isTouched(event.x, event.y)) {
-                        button.startEdit()
-                        performClick()
-                        return@any true
-                    }
-                }
-
-                MotionEvent.ACTION_MOVE -> {
-                    if (button.isEditing) {
-                        button.edit(event.x, event.y)
-                        return@any true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN,
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // Handle this event only if no other button is being edited
+                if (editInfo.editButton == null) {
+                    handled = controls.allButtons.any { button ->
+                        if (button.config.enabled && button.isTouched(event.x, event.y)) {
+                            editInfo.editButton = button
+                            button.startEdit(event.x, event.y)
+                            performClick()
+                            true
+                        } else false
                     }
                 }
             }
-            false
-        }.also { handled -> if (handled) invalidate() }
+
+            MotionEvent.ACTION_MOVE -> {
+                editInfo.editButton?.edit(event.x, event.y)
+                handled = true
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_POINTER_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                editInfo.editButton?.endEdit()
+                editInfo.editButton = null
+                handled = true
+            }
+        }
+
+        handled.also { if (it) invalidate() }
     }
 
     init {
         setOnTouchListener(playingTouchHandler)
     }
 
-    fun setEditMode(editMode : Boolean) = setOnTouchListener(if (editMode) editingTouchHandler else playingTouchHandler)
+    fun setEditMode(editMode : EditMode) {
+        editInfo.editMode = editMode
+        setOnTouchListener(if (isEditing) editingTouchHandler else playingTouchHandler )
+    }
 
     fun resetControls() {
         controls.allButtons.forEach {
-            it.resetRelativeValues()
-            it.config.enabled = true
+            it.resetConfig()
         }
-        controls.globalScale = 1.15f
-        controls.alpha = 155
+        controls.globalScale = OnScreenConfiguration.DefaultGlobalScale
+        controls.alpha = OnScreenConfiguration.DefaultAlpha
         invalidate()
     }
 
@@ -280,6 +284,10 @@ class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs 
     fun decreaseScale() {
         controls.globalScale -= SCALE_STEP
         invalidate()
+    }
+
+    fun setSnapToGrid(snap : Boolean) {
+        editInfo.snapToGrid = snap
     }
 
     fun increaseOpacity() {
@@ -308,7 +316,9 @@ class OnScreenControllerView @JvmOverloads constructor(context : Context, attrs 
         onStickStateChangedListener = listener
     }
 
-    fun getButtonProps() = controls.allButtons.map { Pair(it.buttonId, it.config.enabled) }
+    data class ButtonProp(val buttonId : ButtonId, val enabled : Boolean)
+
+    fun getButtonProps() = controls.allButtons.map { ButtonProp(it.buttonId, it.config.enabled) }
 
     fun setButtonEnabled(buttonId : ButtonId, enabled : Boolean) {
         controls.allButtons.first { it.buttonId == buttonId }.config.enabled = enabled

@@ -70,14 +70,15 @@ namespace skyline::gpu {
             bool vkImageMutableFormatCostly{}; //!< [Adreno Proprietary/Freedreno] An indication that VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT is costly and should not be enabled unless absolutely necessary (Disables UBWC on Adreno GPUs)
             bool adrenoRelaxedFormatAliasing{}; //!< [Adreno Proprietary/Freedreno] An indication that the GPU supports a relaxed version of view format aliasing without needing VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT, this is designed to work in tandem with 'vkImageMutableFormatCostly'
             bool adrenoBrokenFormatReport{}; //!< [Adreno Proprietary] If the drivers report format support incorrectly and include cases that are supported by the hardware
-            bool brokenDescriptorAliasing{}; //!< [Adreno Proprietary] A bug that causes alised descriptor sets to be incorrectly interpreted by the shader compiler leading to it buggering up LLVM function argument types and crashing
             bool relaxedRenderPassCompatibility{}; //!< [Adreno Proprietary/Freedreno] A relaxed version of Vulkan specification's render pass compatibility clause which allows for caching pipeline objects for multi-subpass renderpasses, this is intentionally disabled by default as it requires testing prior to enabling
             bool brokenPushDescriptors{}; //!< [Adreno Proprietary] A bug that causes push descriptor updates to ignored by the driver in certain situations
             bool brokenSpirvPositionInput{}; //!< [Adreno Proprietary] A bug that causes the shader compiler to fail on shaders with vertex position inputs not contained within a struct
+            bool brokenSpirvAccessChainOpt{}; //!< [Adreno Proprietary] A broken optimisation pass causes dynamic access chain offsets to break
             bool brokenComputeShaders{}; //!< [ARM Proprietary] A bug that causes compute shaders in some games to crash the GPU
             bool brokenMultithreadedPipelineCompilation{}; //!< [Qualcomm Proprietary] A bug that causes the shader compiler to crash when compiling pipelines on multiple threads simultaneously
             bool brokenSubgroupMaskExtractDynamic{};  //!< [Qualcomm Proprietary] A bug that causes shaders using OpVectorExtractDynamic on the subgroup mask builtins to fail to compile
             bool brokenSubgroupShuffle{}; //!< [Qualcomm Proprietary] A bug that causes shaders using OpSubgroupShuffle to do all sorts of weird things
+            bool brokenSpirvVectorAccessChain{}; //!< [Qualcomm Proprietary] A bug that causes SPIR-V OpAccessChains to work incorrectly when used to index vector arrays
             bool brokenDynamicStateVertexBindings{};  //!< [ARM Proprietary] A bug that causes VK_EXT_dynamic_state vertex bindings not to work correctly
 
             u32 maxSubpassCount{std::numeric_limits<u32>::max()}; //!< The maximum amount of subpasses within a renderpass, this is limited to 64 on older Adreno proprietary drivers

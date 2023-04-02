@@ -7,6 +7,7 @@ package emu.skyline.input.onscreen
 
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
@@ -26,7 +27,8 @@ abstract class OnScreenButton(
     private val defaultRelativeY : Float,
     private val defaultRelativeWidth : Float,
     private val defaultRelativeHeight : Float,
-    drawableId : Int
+    drawableId : Int,
+    private val defaultEnabled : Boolean
 ) {
     companion object {
         /**
@@ -35,12 +37,11 @@ abstract class OnScreenButton(
         const val CONFIGURED_ASPECT_RATIO = 2074f / 874f
     }
 
-    val config = if (onScreenControllerView.isInEditMode) ControllerConfigurationDummy(defaultRelativeX, defaultRelativeY)
-    else ControllerConfigurationImpl(onScreenControllerView.context, buttonId, defaultRelativeX, defaultRelativeY)
+    val config = OnScreenConfiguration(onScreenControllerView.context, buttonId, defaultRelativeX, defaultRelativeY, defaultEnabled)
 
     protected val drawable = ContextCompat.getDrawable(onScreenControllerView.context, drawableId)!!
 
-    internal val buttonSymbolPaint = Paint().apply {
+    private val buttonSymbolPaint = Paint().apply {
         color = config.textColor
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         isAntiAlias = true
@@ -49,16 +50,27 @@ abstract class OnScreenButton(
 
     var relativeX = config.relativeX
     var relativeY = config.relativeY
-    private val relativeWidth get() = defaultRelativeWidth * config.globalScale
-    private val relativeHeight get() = defaultRelativeHeight * config.globalScale
+    private val relativeWidth get() = defaultRelativeWidth * (config.globalScale + config.scale)
+    private val relativeHeight get() = defaultRelativeHeight * (config.globalScale + config.scale)
 
+    /**
+     * The width of the view this button is in, populated by the view during draw
+     */
     var width = 0
+
+    /**
+     * The height of the view this button is in, populated by the view during draw
+     */
     var height = 0
 
+    /**
+     * The height of the view this button is in, adjusted to an arbitrary aspect ratio used during configuration
+     */
     protected val adjustedHeight get() = width / CONFIGURED_ASPECT_RATIO
 
     /**
-     * Buttons should be at bottom when device have large height than [adjustedHeight]
+     * The difference between the view height and the adjusted view height.
+     * This is used to offset the buttons to the bottom of the screen when the view height is larger than [adjustedHeight]
      */
     protected val heightDiff get() = (height - adjustedHeight).coerceAtLeast(0f)
 
@@ -83,8 +95,20 @@ abstract class OnScreenButton(
 
     var hapticFeedback = false
 
-    var isEditing = false
-        private set
+    /**
+     * The edit session information, populated by the view
+     */
+    protected var editInfo = onScreenControllerView.editInfo
+
+    /**
+     * The touch point when the edit session started
+     */
+    protected var editInitialTouchPoint = PointF()
+
+    /**
+     * The scale of the button when the edit session started
+     */
+    private var editInitialScale = 0f
 
     protected open fun renderCenteredText(canvas : Canvas, text : String, size : Float, x : Float, y : Float, alpha : Int) {
         buttonSymbolPaint.apply {
@@ -134,19 +158,79 @@ abstract class OnScreenButton(
         relativeY = config.relativeY
     }
 
-    fun startEdit() {
-        isEditing = true
+    /**
+     * Starts an edit session
+     * @param x The x coordinate of the initial touch
+     * @param y The y coordinate of the initial touch
+     */
+    open fun startEdit(x : Float, y : Float) {
+        editInitialTouchPoint.set(x, y)
+        editInitialScale = config.scale
     }
 
     open fun edit(x : Float, y : Float) {
-        relativeX = x / width
-        relativeY = (y - heightDiff) / adjustedHeight
+        when (editInfo.editMode) {
+            EditMode.Move -> move(x, y)
+            EditMode.Resize -> resize(x, y)
+            else -> return
+        }
     }
 
-    fun endEdit() {
+    /**
+     * Moves this button to the given coordinates
+     */
+    open fun move(x : Float, y : Float) {
+        var adjustedX = x
+        var adjustedY = y
+
+        if (editInfo.snapToGrid) {
+            val centerX = width / 2f
+            val centerY = height / 2f
+            val gridSize = editInfo.gridSize
+            // The coordinates of the first grid line for each axis, because the grid is centered and might not start at [0,0]
+            val startX = centerX % gridSize
+            val startY = centerY % gridSize
+
+            /**
+             * The offset to apply to a coordinate to snap it to the grid is the remainder of
+             * the coordinate divided by the grid size.
+             * Since the grid is centered on the screen and might not start at [0,0] we need to
+             * subtract the grid start offset, otherwise we'd be calculating the offset for a grid that starts at [0,0].
+             *
+             * Example: Touch event X: 158 | Grid size: 50 | Grid start X: 40 -> Grid lines at 40, 90, 140, 190, ...
+             * Snap offset: 158 - 40 = 118 -> 118 % 50 = 18
+             * Apply offset to X: 158 - 18 = 140 which is a grid line
+             *
+             * If we didn't subtract the grid start offset:
+             * Snap offset: 158 % 50 = 8
+             * Apply offset to X: 158 - 8 = 150 which is not a grid line
+             */
+            val snapOffsetX = (x - startX) % gridSize
+            val snapOffsetY = (y - startY) % gridSize
+
+            adjustedX = x - snapOffsetX
+            adjustedY = y - snapOffsetY
+        }
+
+        relativeX = adjustedX / width
+        relativeY = (adjustedY - heightDiff) / adjustedHeight
+    }
+
+    /**
+     * Resizes this button based on the distance of the given Y coordinate from the initial Y coordinate
+     */
+    open fun resize(x : Float, y : Float) {
+        // Invert the distance because the Y coordinate increases as you move down the screen
+        val verticalDistance = editInitialTouchPoint.y - y
+        config.scale = editInitialScale + verticalDistance / 200f
+    }
+
+    /**
+     * Ends the current edit session
+     */
+    open fun endEdit() {
         config.relativeX = relativeX
         config.relativeY = relativeY
-        isEditing = false
     }
 
     open fun resetRelativeValues() {
@@ -155,5 +239,11 @@ abstract class OnScreenButton(
 
         relativeX = defaultRelativeX
         relativeY = defaultRelativeY
+    }
+
+    open fun resetConfig() {
+        resetRelativeValues()
+        config.enabled = defaultEnabled
+        config.scale = OnScreenConfiguration.DefaultScale
     }
 }

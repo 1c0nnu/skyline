@@ -94,7 +94,7 @@ namespace skyline::gpu {
         profile = Shader::Profile{
             .supported_spirv = traits.supportsSpirv14 ? 0x00010400U : 0x00010000U,
             .unified_descriptor_binding = true,
-            .support_descriptor_aliasing = !traits.quirks.brokenDescriptorAliasing,
+            .support_descriptor_aliasing = true,
             .support_int8 = traits.supportsInt8,
             .support_int16 = traits.supportsInt16,
             .support_int64 = traits.supportsInt64,
@@ -126,7 +126,8 @@ namespace skyline::gpu {
             .has_broken_spirv_subgroup_mask_vector_extract_dynamic = traits.quirks.brokenSubgroupMaskExtractDynamic,
             .has_broken_spirv_subgroup_shuffle = traits.quirks.brokenSubgroupShuffle,
             .max_subgroup_size = traits.subgroupSize,
-            .disable_subgroup_shuffle = *state.settings->disableSubgroupShuffle
+            .has_broken_spirv_vector_access_chain = traits.quirks.brokenSpirvVectorAccessChain,
+            .disable_subgroup_shuffle = *state.settings->disableSubgroupShuffle,
         };
 
         Shader::Settings::values = {
